@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 小恐龍</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f7f7f7;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            background-color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        /* 主選單 UI */
+        #main-menu, #settings-menu {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: white;
+            z-index: 10;
+        }
+        h1 { font-size: 48px; color: #333; margin-bottom: 40px; }
+        .menu-btn {
+            padding: 15px 30px;
+            margin: 10px;
+            font-size: 20px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            transition: 0.3s;
+            width: 300px;
+        }
+        .menu-btn:hover { background-color: #45a049; }
+        .menu-btn:disabled { background-color: #cccccc; cursor: not-allowed; }
+        
+        /* 角落圖示 */
+        #settings-icon {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 30px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        #settings-icon:hover { transform: rotate(90deg); }
+        #esp-status {
+            position: absolute;
+            bottom: 25px;
+            right: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #ff4d4d;
+        }
+
+        /* 遊戲畫布 */
+        canvas { display: none; background-color: #fafafa; }
+        #score-display {
+            position: absolute;
+            top: 20px; right: 20px;
+            font-size: 24px; font-weight: bold;
+            display: none; z-index: 5;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="main-menu">
+        <h1>🦖 恐龍跳跳</h1>
+        <button class="menu-btn" id="btn-mobile" onclick="startGame('mobile')">手機/網頁遊玩</button>
+        <button class="menu-btn" id="btn-esp32" onclick="startGame('esp32')" disabled>使用 ESP32 遊玩</button>
+        
+        <div id="settings-icon" onclick="toggleSettings(true)">⚙️</div>
+        <div id="esp-status">❌ 未連接</div>
+    </div>
+
+    <div id="settings-menu" style="display: none;">
+        <h2>設定</h2>
+        <button class="menu-btn" style="background-color: #008CBA;" onclick="connectESP32()">連接 ESP32 (序列埠)</button>
+        <div style="margin: 20px 0;">
+            <label>音量: <input type="range" min="0" max="100"></label><br><br>
+            <label>靈敏度: <input type="range" min="0" max="100"></label>
+        </div>
+        <button class="menu-btn" style="background-color: #f44336;" onclick="toggleSettings(false)">返回</button>
+    </div>
+
+    <div id="score-display">分數: <span id="score">0</span></div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+</div>
+
+<script>
+    // --- UI 控制 ---
+    const mainMenu = document.getElementById('main-menu');
+    const settingsMenu = document.getElementById('settings-menu');
+    const canvas = document.getElementById('gameCanvas');
+    const scoreDisplay = document.getElementById('score-display');
+    const espStatus = document.getElementById('esp-status');
+    const btnEsp32 = document.getElementById('btn-esp32');
+
+    function toggleSettings(show) {
+        mainMenu.style.display = show ? 'none' : 'flex';
+        settingsMenu.style.display = show ? 'flex' : 'none';
+    }
+
+    // --- Web Serial API (連接 ESP32) ---
+    let port;
+    let reader;
+    let isConnected = false;
+
+    async function connectESP32() {
+        try {
+            // 請求使用者選擇序列埠 (ESP32)
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 9600 });
+            
+            isConnected = true;
+            espStatus.innerHTML = '✅ 已連接';
+            espStatus.style.color = '#4CAF50';
+            btnEsp32.disabled = false;
+            
+            // 開始讀取 ESP32 資料
+            readLoop();
+            toggleSettings(false); // 連接成功後返回主選單
+        } catch (error) {
+            console.error('連接失敗:', error);
+            alert('無法連接設備，請確定 ESP32 已插上且無其他程式占用序列埠。');
+        }
+    }
+
+    async function readLoop() {
+        const textDecoder = new TextDecoderStream();
+        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+        
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) { reader.releaseLock(); break; }
+                if (value) {
+                    // 如果 ESP32 傳來 "JUMP" 字串
+                    if (value.includes("JUMP")) {
+                        dinoJump();
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('讀取錯誤:', error);
+        }
+    }
+
+    // --- 遊戲邏輯 ---
+    const ctx = canvas.getContext('2d');
+    let gameLoop;
+    let score = 0;
+    let isPlaying = false;
+
+    // 恐龍物件
+    let dino = { x: 50, y: 300, width: 40, height: 40, dy: 0, gravity: 0.8, jumpPower: -12, isGrounded: true };
+    // 仙人掌障礙物
+    let cactus = { x: 800, y: 300, width: 30, height: 40, speed: 6 };
+
+    function startGame(mode) {
+        mainMenu.style.display = 'none';
+        canvas.style.display = 'block';
+        scoreDisplay.style.display = 'block';
+        
+        // 重置遊戲參數
+        dino.y = 300; dino.dy = 0;
+        cactus.x = 800;
+        score = 0;
+        isPlaying = true;
+        
+        // 如果是手機/網頁模式，加入點擊與空白鍵監聽
+        if (mode === 'mobile') {
+            window.addEventListener('keydown', handleKey);
+            window.addEventListener('touchstart', dinoJump);
+            window.addEventListener('mousedown', dinoJump);
+        }
+
+        update();
+    }
+
+    function handleKey(e) { if (e.code === 'Space') dinoJump(); }
+
+    function dinoJump() {
+        if (dino.isGrounded && isPlaying) {
+            dino.dy = dino.jumpPower;
+            dino.isGrounded = false;
+        }
+    }
+
+    function gameOver() {
+        isPlaying = false;
+        cancelAnimationFrame(gameLoop);
+        window.removeEventListener('keydown', handleKey);
+        window.removeEventListener('touchstart', dinoJump);
+        window.removeEventListener('mousedown', dinoJump);
+        alert(`遊戲結束！你的分數是: ${Math.floor(score)}`);
+        
+        // 返回主選單
+        canvas.style.display = 'none';
+        scoreDisplay.style.display = 'none';
+        mainMenu.style.display = 'flex';
+    }
+
+    function update() {
+        if (!isPlaying) return;
+
+        // 清除畫布
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 物理引擎：重力與跳躍
+        dino.dy += dino.gravity;
+        dino.y += dino.dy;
+        
+        // 地面碰撞
+        if (dino.y >= 300) {
+            dino.y = 300;
+            dino.dy = 0;
+            dino.isGrounded = true;
+        }
+
+        // 障礙物移動
+        cactus.x -= cactus.speed;
+        if (cactus.x < -cactus.width) {
+            cactus.x = 800 + Math.random() * 400; // 隨機生成下一個障礙物距離
+            cactus.speed += 0.2; // 越來越快
+        }
+
+        // 分數計算
+        score += 0.1;
+        document.getElementById('score').innerText = Math.floor(score);
+
+        // 繪製恐龍 (簡單方塊代替)
+        ctx.fillStyle = '#333';
+        ctx.fillRect(dino.x, dino.y, dino.width, dino.height);
+
+        // 繪製仙人掌 (簡單方塊代替)
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(cactus.x, cactus.y, cactus.width, cactus.height);
+
+        // 繪製地板
+        ctx.beginPath();
+        ctx.moveTo(0, 340);
+        ctx.lineTo(800, 340);
+        ctx.stroke();
+
+        // 碰撞偵測 (AABB)
+        if (dino.x < cactus.x + cactus.width &&
+            dino.x + dino.width > cactus.x &&
+            dino.y < cactus.y + cactus.height &&
+            dino.height + dino.y > cactus.y) {
+            gameOver();
+            return;
+        }
+
+        gameLoop = requestAnimationFrame(update);
+    }
+</script>
+
+</body>
+</html>
