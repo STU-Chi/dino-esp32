@@ -146,27 +146,35 @@
     }
 
     async function readLoop() {
-        const textDecoder = new TextDecoderStream();
-        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-        reader = textDecoder.readable.getReader();
-        
-        try {
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) { reader.releaseLock(); break; }
-                if (value) {
-                    console.log("收到原始資料:", value); 
-                    buffer += value;
-                    // 如果 ESP32 傳來 "JUMP" 字串
-                    if (value.includes("JUMP")) {
-                        dinoJump();
+            const textDecoder = new TextDecoderStream();
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+            
+            let buffer = ""; // 建立一個字串緩衝區
+            
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) { reader.releaseLock(); break; }
+                    if (value) {
+                        buffer += value; // 把收到的資料加進緩衝區
+                        
+                        // 檢查緩衝區裡面有沒有完整的 "JUMP"
+                        if (buffer.includes("JUMP")) {
+                            dinoJump();
+                            buffer = ""; // 跳躍後清空緩衝區，準備接收下一次指令
+                        }
+                        
+                        // 避免緩衝區無限長大，如果長度超過一定字數就清空
+                        if (buffer.length > 50) {
+                            buffer = "";
+                        }
                     }
                 }
+            } catch (error) {
+                console.error('讀取錯誤:', error);
             }
-        } catch (error) {
-            console.error('讀取錯誤:', error);
         }
-    }
 
     // --- 遊戲邏輯 ---
     const ctx = canvas.getContext('2d');
