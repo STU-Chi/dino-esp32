@@ -157,6 +157,7 @@
                     const { value, done } = await reader.read();
                     if (done) { reader.releaseLock(); break; }
                     if (value) {
+                        console.log("收到原始資料:", value);
                         buffer += value; // 把收到的資料加進緩衝區
                         
                         // 檢查緩衝區裡面有沒有完整的 "JUMP"
