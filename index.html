@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 小恐龍</title>
-    <style>
+<style>
         body {
             margin: 0;
             display: flex;
@@ -18,7 +18,9 @@
         #game-container {
             position: relative;
             width: 800px;
+            max-width: 100vw;  /* 讓寬度適應手機 */
             height: 400px;
+            max-height: 100vh; /* 讓高度適應手機 */
             background-color: white;
             box-shadow: 0 4px 10px rgba(0,0,0,0.1);
             border-radius: 10px;
@@ -47,6 +49,7 @@
             color: white;
             transition: 0.3s;
             width: 300px;
+            max-width: 90%; /* 避免按鈕在手機上超出邊界 */
         }
         .menu-btn:hover { background-color: #45a049; }
         .menu-btn:disabled { background-color: #cccccc; cursor: not-allowed; }
@@ -55,7 +58,7 @@
         .ble-btn { background-color: #008CBA; }
         .ble-btn:hover { background-color: #007bb5; }
 
-        /* 角落圖示 */
+        /* 角落圖示預設位置 (電腦版) */
         #settings-icon {
             position: absolute;
             bottom: 20px;
@@ -82,7 +85,32 @@
             font-size: 24px; font-weight: bold;
             display: none; z-index: 5;
         }
-    </style>
+
+        /* ========================================= */
+        /* 手機版專屬適配 (當螢幕高度太小，或寬度太窄時觸發) */
+        /* ========================================= */
+        @media (max-width: 600px), (max-height: 500px) {
+            h1 { 
+                font-size: 32px; 
+                margin-bottom: 15px; /* 縮小標題間距 */
+            }
+            .menu-btn {
+                padding: 12px 20px;
+                margin: 8px; /* 縮小按鈕間距 */
+                font-size: 18px;
+            }
+            #settings-icon {
+                bottom: 10px; /* 把齒輪推到最下面 */
+                left: 10px;
+                font-size: 24px; /* 稍微縮小圖示 */
+            }
+            #esp-status {
+                bottom: 12px; /* 把狀態字推到最下面 */
+                right: 10px;
+                font-size: 16px; /* 稍微縮小字體 */
+            }
+        }
+</style>
 </head>
 <body>
 
