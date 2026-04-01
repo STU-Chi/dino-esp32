@@ -51,6 +51,10 @@
         .menu-btn:hover { background-color: #45a049; }
         .menu-btn:disabled { background-color: #cccccc; cursor: not-allowed; }
         
+        /* 藍牙按鈕專屬樣式 */
+        .ble-btn { background-color: #008CBA; }
+        .ble-btn:hover { background-color: #007bb5; }
+
         /* 角落圖示 */
         #settings-icon {
             position: absolute;
@@ -87,7 +91,7 @@
         <h1>🦖 恐龍跳跳</h1>
         <button class="menu-btn" id="btn-mobile" onclick="startGame('mobile')">手機/網頁遊玩</button>
         <button class="menu-btn" id="btn-esp32" onclick="startGame('esp32')" disabled>使用 ESP32 遊玩</button>
-        <button onclick="connectBLE()">連接藍牙 ESP32</button>
+        <button class="menu-btn ble-btn" onclick="connectBLE()">連接藍牙 ESP32</button>
         
         <div id="settings-icon" onclick="toggleSettings(true)">⚙️</div>
         <div id="esp-status">❌ 未連接</div>
@@ -95,7 +99,7 @@
 
     <div id="settings-menu" style="display: none;">
         <h2>設定</h2>
-        <button class="menu-btn" style="background-color: #008CBA;" onclick="connectESP32()">連接 ESP32 (序列埠)</button>
+        <button class="menu-btn" style="background-color: #f39c12;" onclick="connectESP32()">連接 ESP32 (有線序列埠)</button>
         <div style="margin: 20px 0;">
             <label>音量: <input type="range" min="0" max="100"></label><br><br>
             <label>靈敏度: <input type="range" min="0" max="100"></label>
@@ -121,25 +125,25 @@
         settingsMenu.style.display = show ? 'flex' : 'none';
     }
 
-    // --- Web Serial API (連接 ESP32) ---
+    // ==========================================
+    // --- Web Serial API (有線連接 ESP32) ---
+    // ==========================================
     let port;
     let reader;
     let isConnected = false;
 
     async function connectESP32() {
         try {
-            // 請求使用者選擇序列埠 (ESP32)
             port = await navigator.serial.requestPort();
-            await port.open({ baudRate: 115200 });
+            await port.open({ baudRate: 115200 }); // 確保鮑率為 115200
             
             isConnected = true;
-            espStatus.innerHTML = '✅ 已連接';
-            espStatus.style.color = '#4CAF50';
+            espStatus.innerHTML = '✅ 已連接 (有線)';
+            espStatus.style.color = '#f39c12';
             btnEsp32.disabled = false;
             
-            // 開始讀取 ESP32 資料
             readLoop();
-            toggleSettings(false); // 連接成功後返回主選單
+            toggleSettings(false);
         } catch (error) {
             console.error('連接失敗:', error);
             alert('無法連接設備，請確定 ESP32 已插上且無其他程式占用序列埠。');
@@ -147,46 +151,94 @@
     }
 
     async function readLoop() {
-            const textDecoder = new TextDecoderStream();
-            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-            reader = textDecoder.readable.getReader();
-            
-            let buffer = ""; // 建立一個字串緩衝區
-            
-            try {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) { reader.releaseLock(); break; }
-                    if (value) {
-                        console.log("收到原始資料:", value);
-                        buffer += value; // 把收到的資料加進緩衝區
-                        
-                        // 檢查緩衝區裡面有沒有完整的 "JUMP"
-                        if (buffer.includes("JUMP")) {
-                            dinoJump();
-                            buffer = ""; // 跳躍後清空緩衝區，準備接收下一次指令
-                        }
-                        
-                        // 避免緩衝區無限長大，如果長度超過一定字數就清空
-                        if (buffer.length > 50) {
-                            buffer = "";
-                        }
+        const textDecoder = new TextDecoderStream();
+        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+        
+        let buffer = ""; 
+        
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) { reader.releaseLock(); break; }
+                if (value) {
+                    buffer += value;
+                    if (buffer.includes("JUMP")) {
+                        dinoJump();
+                        buffer = ""; 
                     }
+                    if (buffer.length > 50) buffer = "";
                 }
-            } catch (error) {
-                console.error('讀取錯誤:', error);
             }
+        } catch (error) {
+            console.error('讀取錯誤:', error);
         }
+    } // 補上遺漏的括號
 
+    // ==========================================
+    // --- Web Bluetooth API (無線連接 ESP32) ---
+    // ==========================================
+    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+    let bleDevice;
+
+    async function connectBLE() {
+        try {
+            console.log('正在搜尋藍牙裝置...');
+            bleDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'ESP32_Dino' }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            console.log('連線至 GATT 伺服器...');
+            const server = await bleDevice.gatt.connect();
+
+            console.log('取得藍牙服務...');
+            const service = await server.getPrimaryService(SERVICE_UUID);
+
+            console.log('取得特徵值...');
+            const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+            console.log('啟動通知接收...');
+            await characteristic.startNotifications();
+            characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+            
+            // 更新 UI 狀態
+            isConnected = true;
+            espStatus.innerHTML = '✅ 已連接 (藍牙)';
+            espStatus.style.color = '#008CBA';
+            btnEsp32.disabled = false;
+            
+            console.log('✅ 藍牙連接成功！');
+            alert("藍牙連接成功！可以開始無線遊玩了！");
+
+        } catch (error) {
+            console.error('藍牙連線失敗或被取消:', error);
+            alert("藍牙連線失敗！請確認電腦藍牙已開啟，且 ESP32 正在廣播。");
+        }
+    }
+
+    function handleNotifications(event) {
+        const value = event.target.value;
+        const decoder = new TextDecoder('utf-8');
+        const message = decoder.decode(value).trim(); // 使用 trim 去除多餘空白與換行
+
+        console.log("收到藍牙訊號:", message);
+
+        if (message.includes("JUMP")) {
+            dinoJump(); 
+        }
+    }
+
+    // ==========================================
     // --- 遊戲邏輯 ---
+    // ==========================================
     const ctx = canvas.getContext('2d');
     let gameLoop;
     let score = 0;
     let isPlaying = false;
 
-    // 恐龍物件
     let dino = { x: 50, y: 300, width: 40, height: 40, dy: 0, gravity: 0.8, jumpPower: -12, isGrounded: true };
-    // 仙人掌障礙物
     let cactus = { x: 800, y: 300, width: 30, height: 40, speed: 6 };
 
     function startGame(mode) {
@@ -194,13 +246,11 @@
         canvas.style.display = 'block';
         scoreDisplay.style.display = 'block';
         
-        // 重置遊戲參數
         dino.y = 300; dino.dy = 0;
         cactus.x = 800;
         score = 0;
         isPlaying = true;
         
-        // 如果是手機/網頁模式，加入點擊與空白鍵監聽
         if (mode === 'mobile') {
             window.addEventListener('keydown', handleKey);
             window.addEventListener('touchstart', dinoJump);
@@ -227,7 +277,6 @@
         window.removeEventListener('mousedown', dinoJump);
         alert(`遊戲結束！你的分數是: ${Math.floor(score)}`);
         
-        // 返回主選單
         canvas.style.display = 'none';
         scoreDisplay.style.display = 'none';
         mainMenu.style.display = 'flex';
@@ -236,46 +285,37 @@
     function update() {
         if (!isPlaying) return;
 
-        // 清除畫布
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 物理引擎：重力與跳躍
         dino.dy += dino.gravity;
         dino.y += dino.dy;
         
-        // 地面碰撞
         if (dino.y >= 300) {
             dino.y = 300;
             dino.dy = 0;
             dino.isGrounded = true;
         }
 
-        // 障礙物移動
         cactus.x -= cactus.speed;
         if (cactus.x < -cactus.width) {
-            cactus.x = 800 + Math.random() * 400; // 隨機生成下一個障礙物距離
-            cactus.speed += 0.2; // 越來越快
+            cactus.x = 800 + Math.random() * 400; 
+            cactus.speed += 0.2; 
         }
 
-        // 分數計算
         score += 0.1;
         document.getElementById('score').innerText = Math.floor(score);
 
-        // 繪製恐龍 (簡單方塊代替)
         ctx.fillStyle = '#333';
         ctx.fillRect(dino.x, dino.y, dino.width, dino.height);
 
-        // 繪製仙人掌 (簡單方塊代替)
         ctx.fillStyle = '#4CAF50';
         ctx.fillRect(cactus.x, cactus.y, cactus.width, cactus.height);
 
-        // 繪製地板
         ctx.beginPath();
         ctx.moveTo(0, 340);
         ctx.lineTo(800, 340);
         ctx.stroke();
 
-        // 碰撞偵測 (AABB)
         if (dino.x < cactus.x + cactus.width &&
             dino.x + dino.width > cactus.x &&
             dino.y < cactus.y + cactus.height &&
@@ -286,58 +326,7 @@
 
         gameLoop = requestAnimationFrame(update);
     }
-    // 這裡的 UUID 必須跟 ESP32 程式碼裡的一模一樣！
-const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-let bleDevice;
-
-async function connectBLE() {
-    try {
-        console.log('正在搜尋藍牙裝置...');
-        // 1. 請求連線，過濾出名字叫 ESP32_Dino 的裝置
-        bleDevice = await navigator.bluetooth.requestDevice({
-            filters: [{ name: 'ESP32_Dino' }],
-            optionalServices: [SERVICE_UUID]
-        });
-
-        console.log('連線至 GATT 伺服器...');
-        const server = await bleDevice.gatt.connect();
-
-        console.log('取得藍牙服務...');
-        const service = await server.getPrimaryService(SERVICE_UUID);
-
-        console.log('取得特徵值...');
-        const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-        console.log('啟動通知接收...');
-        // 2. 訂閱 ESP32 發出來的通知 (Notify)
-        await characteristic.startNotifications();
-        
-        // 3. 當收到資料時，觸發 handleNotifications 函數
-        characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
-        
-        console.log('✅ 藍牙連接成功！可以開始無線遊玩了！');
-        alert("藍牙連接成功！");
-
-    } catch (error) {
-        console.error('藍牙連線失敗或被取消:', error);
-    }
-}
-
-// 處理收到的藍牙資料
-function handleNotifications(event) {
-    // 藍牙傳過來的是二進位資料陣列，需要解碼成文字
-    const value = event.target.value;
-    const decoder = new TextDecoder('utf-8');
-    const message = decoder.decode(value);
-
-    console.log("收到藍牙訊號:", message);
-
-    if (message === "JUMP") {
-        dinoJump(); // 呼叫你的小恐龍跳躍函數！
-    }
-}
 </script>
 
 </body>
