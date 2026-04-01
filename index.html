@@ -129,7 +129,7 @@
         try {
             // 請求使用者選擇序列埠 (ESP32)
             port = await navigator.serial.requestPort();
-            await port.open({ baudRate: 9600 });
+            await port.open({ baudRate: 115200 });
             
             isConnected = true;
             espStatus.innerHTML = '✅ 已連接';
