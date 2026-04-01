@@ -155,6 +155,8 @@
                 const { value, done } = await reader.read();
                 if (done) { reader.releaseLock(); break; }
                 if (value) {
+                    console.log("收到原始資料:", value); 
+                    buffer += value;
                     // 如果 ESP32 傳來 "JUMP" 字串
                     if (value.includes("JUMP")) {
                         dinoJump();
