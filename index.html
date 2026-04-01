@@ -87,6 +87,7 @@
         <h1>🦖 恐龍跳跳</h1>
         <button class="menu-btn" id="btn-mobile" onclick="startGame('mobile')">手機/網頁遊玩</button>
         <button class="menu-btn" id="btn-esp32" onclick="startGame('esp32')" disabled>使用 ESP32 遊玩</button>
+        <button onclick="connectBLE()">連接藍牙 ESP32</button>
         
         <div id="settings-icon" onclick="toggleSettings(true)">⚙️</div>
         <div id="esp-status">❌ 未連接</div>
@@ -285,6 +286,58 @@
 
         gameLoop = requestAnimationFrame(update);
     }
+    // 這裡的 UUID 必須跟 ESP32 程式碼裡的一模一樣！
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+let bleDevice;
+
+async function connectBLE() {
+    try {
+        console.log('正在搜尋藍牙裝置...');
+        // 1. 請求連線，過濾出名字叫 ESP32_Dino 的裝置
+        bleDevice = await navigator.bluetooth.requestDevice({
+            filters: [{ name: 'ESP32_Dino' }],
+            optionalServices: [SERVICE_UUID]
+        });
+
+        console.log('連線至 GATT 伺服器...');
+        const server = await bleDevice.gatt.connect();
+
+        console.log('取得藍牙服務...');
+        const service = await server.getPrimaryService(SERVICE_UUID);
+
+        console.log('取得特徵值...');
+        const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+        console.log('啟動通知接收...');
+        // 2. 訂閱 ESP32 發出來的通知 (Notify)
+        await characteristic.startNotifications();
+        
+        // 3. 當收到資料時，觸發 handleNotifications 函數
+        characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+        
+        console.log('✅ 藍牙連接成功！可以開始無線遊玩了！');
+        alert("藍牙連接成功！");
+
+    } catch (error) {
+        console.error('藍牙連線失敗或被取消:', error);
+    }
+}
+
+// 處理收到的藍牙資料
+function handleNotifications(event) {
+    // 藍牙傳過來的是二進位資料陣列，需要解碼成文字
+    const value = event.target.value;
+    const decoder = new TextDecoder('utf-8');
+    const message = decoder.decode(value);
+
+    console.log("收到藍牙訊號:", message);
+
+    if (message === "JUMP") {
+        dinoJump(); // 呼叫你的小恐龍跳躍函數！
+    }
+}
 </script>
 
 </body>
